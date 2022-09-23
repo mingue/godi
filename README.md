@@ -31,12 +31,12 @@ godi.Transient(cont, func(c *godi.Container) SomeInterface {
 })
 
 // Singleton instances return always the same instance for the duration of the process
-godi.Transient(cont, func(c *godi.Container) SomeInterface {
+godi.Singleton(cont, func(c *godi.Container) SomeInterface {
     return &SomeStruct{}
 })
 
 // Scoped instances return the same instance per container
-godi.Transient(cont, func(c *godi.Container) SomeInterface {
+godi.Scoped(cont, func(c *godi.Container) SomeInterface {
     return &SomeStruct{}
 })
 
