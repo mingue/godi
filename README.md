@@ -4,7 +4,8 @@ Simple & Performant Dependency Injection Container for Go
 
 ## Objectives  
 
-- Remove the need to pass context.Context everywhere and avoid breaking changes to existing APIs
+- Remove the need to pass context.Context everywhere for cancellations and avoid breaking changes to existing APIs
+- Provide a strongly typed way of defining request scoped values to avoid using context.WithValue
 - Be able to easily decorate an interface to extend it's functionality
 - Be able to create custom scopes to match different lifetimes: request, session...
 - Be compatible with std APIs for easy usage
