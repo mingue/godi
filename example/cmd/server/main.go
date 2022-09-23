@@ -45,6 +45,7 @@ func main() {
 	// Start the http server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		requestCont := cont.NewScope()
+		// Only as example, you can now register a struct to be injected anywhere on the stack
 		ctx := context.WithValue(r.Context(), "Some", "Value")
 
 		godi.Scoped(requestCont, func(c *godi.Container) context.Context {
