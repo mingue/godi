@@ -2,6 +2,7 @@ package test
 
 import (
 	"log"
+	"strconv"
 	"testing"
 
 	"github.com/mingue/godi"
@@ -62,7 +63,7 @@ func TestDecorateOnlyAcceptsInterfaces(t *testing.T) {
 	}
 }
 
-func TestDecorateATransient(t *testing.T) {
+func TestDecorateAnInterface(t *testing.T) {
 	var cont = godi.New()
 	godi.Transient(cont, func(c *godi.Container) Doer {
 		return &SimpleDoer{}
@@ -95,5 +96,47 @@ func TestDecorateATransient(t *testing.T) {
 
 	if decorated.count != 1 {
 		log.Fatal("Count should be 1")
+	}
+}
+
+func TestDecorateNamedDefinitions(t *testing.T) {
+	var cont = godi.New()
+	godi.TransientNamed(cont, "1", func(c *godi.Container) Doer {
+		return &SimpleDoer{}
+	})
+
+	godi.TransientNamed(cont, "2", func(c *godi.Container) Doer {
+		return &SimpleDoer{}
+	})
+
+	err := godi.Decorate(cont, func(d Doer, c *godi.Container) Doer {
+		return &CallCountDecorator{
+			d: d,
+		}
+	})
+
+	if err != nil {
+		log.Fatalf("Couldn't decorate: %v", err.Error())
+	}
+
+	for i := 1; i < 3; i++ {
+		x, _ := godi.GetNamed[Doer](cont, strconv.Itoa(i))
+		x.Do()
+
+		decorator := x.(*CallCountDecorator)
+
+		if decorator.preCount != 1 {
+			log.Fatal("Precount should be 1")
+		}
+
+		if decorator.postCount != 1 {
+			log.Fatal("Postcount should be 1")
+		}
+
+		decorated := decorator.d.(*SimpleDoer)
+
+		if decorated.count != 1 {
+			log.Fatal("Count should be 1")
+		}
 	}
 }

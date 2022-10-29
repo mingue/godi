@@ -18,9 +18,17 @@ func main() {
 	cont := godi.New()
 
 	// Register dependencies
-	godi.Scoped(cont, func(c *godi.Container) http.Handler {
+	rootPath := "/"
+	readyPath := "/ready"
+
+	godi.ScopedNamed(cont, rootPath, func(c *godi.Container) http.Handler {
 		svc, _ := godi.Get[invoice.InvoiceService](c)
 		return invoice.NewInvoiceHandler(svc)
+	})
+
+	godi.ScopedNamed(cont, readyPath, func(c *godi.Container) http.Handler {
+		ctx, _ := godi.Get[context.Context](c)
+		return &invoice.ReadyHandler{Ctx: ctx}
 	})
 
 	godi.Scoped(cont, func(c *godi.Container) invoice.InvoiceRepository {
@@ -43,15 +51,40 @@ func main() {
 	})
 
 	// Start the http server
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(rootPath, func(w http.ResponseWriter, r *http.Request) {
 		requestCont := cont.NewScope()
-		// Only as example, you can now register a struct to be injected anywhere on the stack
-		ctx := context.WithValue(r.Context(), "Some", "Value")
 
+		// Only as example, you can now register a struct to be injected anywhere on the stack
+		ctx := context.WithValue(r.Context(), "Some", "OnRootPath")
 		godi.Scoped(requestCont, func(c *godi.Container) context.Context {
 			return ctx
 		})
-		h, _ := godi.Get[http.Handler](requestCont)
+		// if err != nil {
+		// 	fmt.Printf("Error registering the context: %v \n", err)
+		// 	r.Response.StatusCode = 500
+		// 	fmt.Fprint(w, fmt.Sprintf("Error registering the context: %v \n", err))
+		// 	return
+		// }
+
+		h, _ := godi.GetNamed[http.Handler](requestCont, rootPath)
+		h.ServeHTTP(w, r)
+	})
+
+	http.HandleFunc(readyPath, func(w http.ResponseWriter, r *http.Request) {
+		requestCont := cont.NewScope()
+
+		// Only as example, you can now register a struct to be injected anywhere on the stack
+		ctx := context.WithValue(r.Context(), "Some", "OnReadyPath")
+		err := godi.Scoped(requestCont, func(c *godi.Container) context.Context {
+			return ctx
+		})
+		if err != nil {
+			r.Response.StatusCode = 500
+			fmt.Fprint(w, fmt.Sprintf("Error registering the context: %v \n", err))
+			return
+		}
+
+		h, _ := godi.GetNamed[http.Handler](requestCont, readyPath)
 		h.ServeHTTP(w, r)
 	})
 

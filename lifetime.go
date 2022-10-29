@@ -14,7 +14,7 @@ const (
 )
 
 type lifetimeCache struct {
-	entries map[reflect.Type]*cacheEntry
+	entries map[reflect.Type]map[string]*cacheEntry
 	mx      sync.Mutex
 }
 

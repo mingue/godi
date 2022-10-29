@@ -1,0 +1,55 @@
+# v1.50.1
+# Please don't remove the first line. It uses in CI to determine the golangci version
+run:
+  deadline: 5m
+
+issues:
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
+
+  exclude-use-default: false
+
+linters-settings:
+  nolintlint:
+    # Disable to ensure that nolint directives don't have a leading space. Default is true.
+    allow-leading-space: false
+  exhaustive:
+    default-signifies-exhaustive: true
+  govet:
+    check-shadowing: true
+  cyclop:
+    max-complexity: 25
+  maligned:
+    suggest-new: true
+  dupl:
+    threshold: 150
+  goconst:
+    min-len: 10
+    min-occurrences: 4
+  funlen:
+    lines: 80
+    statements: 60
+
+linters:
+  enable-all: true
+  disable:
+    - godot
+    #- godox
+    #- gomodguard
+    - wsl
+    - gomnd
+    - goheader
+    - exhaustivestruct
+    - thelper
+    - gocyclo # replaced by cyclop since it also calculates the package complexity
+    - maligned # replaced by govet 'fieldalignment'
+    - interfacer # deprecated
+    - scopelint # deprecated, replaced by exportloopref
+    - golint # this linter is deprecated
+    - ireturn
+    - tagliatelle
+    - exhaustruct
+    - gofumpt
+  fast: false

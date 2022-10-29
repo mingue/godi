@@ -14,7 +14,8 @@ const (
 )
 
 type Container struct {
-	definitions    map[reflect.Type]*definition
+	globalDef      map[reflect.Type]map[string]*definition
+	scopedDef      map[reflect.Type]map[string]*definition
 	singletonCache *lifetimeCache
 	scopedCache    *lifetimeCache
 }
@@ -23,7 +24,7 @@ type definition struct {
 	lifetime lifetime
 	/*
 		This is a slice of factories to contain the factory for the instance and the decorators
-		The decorator have the following definition: func(decorated T, c *Container) T
+		The decorators have the following definition: func(decorated T, c *Container) T
 		The item to create has the definition: func(c *Container) T
 	*/
 	f []any
@@ -31,44 +32,82 @@ type definition struct {
 
 func New() *Container {
 	var singletonCache = lifetimeCache{
-		entries: make(map[reflect.Type]*cacheEntry),
+		entries: make(map[reflect.Type]map[string]*cacheEntry),
 		mx:      sync.Mutex{},
 	}
 
 	var scopedCache = lifetimeCache{
-		entries: make(map[reflect.Type]*cacheEntry),
+		entries: make(map[reflect.Type]map[string]*cacheEntry),
 		mx:      sync.Mutex{},
 	}
 
 	return &Container{
-		definitions:    make(map[reflect.Type]*definition),
+		globalDef:      make(map[reflect.Type]map[string]*definition),
 		singletonCache: &singletonCache,
 		scopedCache:    &scopedCache,
 	}
 }
 
 func Singleton[T any](c *Container, f func(c *Container) T) error {
-	return add(c, LifetimeSingleton, f)
+	return add(c, "", LifetimeSingleton, f)
 }
 
 func Scoped[T any](c *Container, f func(c *Container) T) error {
-	return add(c, LifetimeScoped, f)
+	return add(c, "", LifetimeScoped, f)
 }
 
 func Transient[T any](c *Container, f func(c *Container) T) error {
-	return add(c, LifetimeTransient, f)
+	return add(c, "", LifetimeTransient, f)
 }
 
-func add[T any](c *Container, lifetime lifetime, f func(c *Container) T) error {
+func SingletonNamed[T any](c *Container, name string, f func(c *Container) T) error {
+	return add(c, name, LifetimeSingleton, f)
+}
+
+func ScopedNamed[T any](c *Container, name string, f func(c *Container) T) error {
+	return add(c, name, LifetimeScoped, f)
+}
+
+func TransientNamed[T any](c *Container, name string, f func(c *Container) T) error {
+	return add(c, name, LifetimeTransient, f)
+}
+
+func add[T any](c *Container, name string, lifetime lifetime, f func(c *Container) T) error {
 	factoryName := getKeyFromT[T]()
 
-	_, exists := c.definitions[factoryName]
+	var typeDef map[string]*definition
+	foundTypeDef := false
 
-	if exists {
-		return fmt.Errorf(ErrFactoryAlreadyRegistered)
+	// Search for existing type def in scoped def if exists or on the global map
+	if c.scopedDef != nil {
+		typeDef, foundTypeDef = c.scopedDef[factoryName]
 	}
 
-	c.definitions[factoryName] = &definition{
+	if !foundTypeDef {
+		typeDef, foundTypeDef = c.globalDef[factoryName]
+	}
+
+	// If a definition exist for the same type and name throw err
+	if foundTypeDef {
+		_, foundNamedDef := typeDef[name]
+
+		if foundNamedDef {
+			return fmt.Errorf(ErrFactoryAlreadyRegistered)
+		}
+	}
+
+	// If typeDef not found create a new one in either scopedDef or globalDef
+	if !foundTypeDef {
+		typeDef = make(map[string]*definition)
+
+		if lifetime == LifetimeScoped && c.scopedDef != nil {
+			c.scopedDef[factoryName] = typeDef
+		} else {
+			c.globalDef[factoryName] = typeDef
+		}
+	}
+
+	typeDef[name] = &definition{
 		lifetime: lifetime,
 		f:        []any{f},
 	}
@@ -79,8 +118,18 @@ func add[T any](c *Container, lifetime lifetime, f func(c *Container) T) error {
 func Decorate[T any](c *Container, f func(decorated T, c *Container) T) error {
 	target := getKeyFromT[T]()
 
-	_, found := c.definitions[target]
-	if !found {
+	var typeDef map[string]*definition
+	foundTypeDef := false
+
+	if c.scopedDef != nil {
+		typeDef, foundTypeDef = c.scopedDef[target]
+	}
+
+	if !foundTypeDef {
+		typeDef, foundTypeDef = c.globalDef[target]
+	}
+
+	if !foundTypeDef {
 		return fmt.Errorf(ErrDecoratorBeforeFactory)
 	}
 
@@ -88,88 +137,158 @@ func Decorate[T any](c *Container, f func(decorated T, c *Container) T) error {
 		return fmt.Errorf(ErrDecoratedMustBeInterface)
 	}
 
-	for key, def := range c.definitions {
-		if target == key {
-			def.f = append(def.f, f)
-		}
+	// For each registration for the type we add the decorated as we can have named definitions
+	for _, namedDef := range typeDef {
+		namedDef.f = append(namedDef.f, f)
 	}
 
 	return nil
 }
 
 func Get[T any](c *Container) (T, error) {
+	return GetNamed[T](c, "")
+}
+
+func GetNamed[T any](c *Container, name string) (T, error) {
 	key := getKeyFromT[T]()
 
-	definition, exists := c.definitions[key]
+	var typeDef map[string]*definition
+	foundTypeDef := false
 
-	if !exists {
+	if c.scopedDef != nil {
+		typeDef, foundTypeDef = c.scopedDef[key]
+	}
+
+	if !foundTypeDef {
+		typeDef, foundTypeDef = c.globalDef[key]
+	}
+
+	if !foundTypeDef {
 		var result T
+
 		return result, fmt.Errorf(ErrFactoryNotRegistered)
 	}
 
-	if definition.lifetime == LifetimeSingleton {
-		value, found := getFromCacheOrBuild[T](c, c.singletonCache, key, definition)
+	if len(typeDef) == 0 {
+		var result T
+
+		return result, fmt.Errorf(ErrFactoryNotRegistered)
+	}
+
+	namedDef, foundNamedDef := typeDef[name]
+
+	if !foundNamedDef {
+		var result T
+
+		return result, fmt.Errorf(ErrFactoryNotRegistered)
+	}
+
+	if namedDef.lifetime == LifetimeSingleton {
+		value, found := getFromCacheOrBuild[T](c, c.singletonCache, key, name, namedDef)
+
 		return value, found
 	}
 
-	if definition.lifetime == LifetimeScoped {
-		value, found := getFromCacheOrBuild[T](c, c.scopedCache, key, definition)
+	if namedDef.lifetime == LifetimeScoped {
+		value, found := getFromCacheOrBuild[T](c, c.scopedCache, key, name, namedDef)
+
 		return value, found
 	}
 
-	return buildItem[T](c, definition), nil
+	return buildItem[T](c, namedDef), nil
 }
 
 func (c *Container) NewScope() *Container {
 	var newScopedCache = lifetimeCache{
-		entries: make(map[reflect.Type]*cacheEntry),
+		entries: make(map[reflect.Type]map[string]*cacheEntry),
 		mx:      sync.Mutex{},
 	}
 
 	return &Container{
-		definitions:    c.definitions,
+		globalDef:      c.globalDef,
+		scopedDef:      make(map[reflect.Type]map[string]*definition),
 		singletonCache: c.singletonCache,
 		scopedCache:    &newScopedCache,
 	}
 }
 
-func getFromCacheOrBuild[T any](c *Container, cache *lifetimeCache, key reflect.Type, d *definition) (T, error) {
-	value, found := cache.entries[key]
+// We use a thread safe from getting items from the cache or build new ones
+// There are 2 level caches one to lock the creation of containers for the type
+// and the second one for the instance itself
+// as it might need to resolved other dependencies and types.
+func getFromCacheOrBuild[T any](
+	c *Container,
+	cache *lifetimeCache,
+	key reflect.Type,
+	name string,
+	d *definition) (T, error) {
+	typeCache, found := cache.entries[key]
+
+	// If cache not found for the type create one
+	if !found {
+		cache.mx.Lock()
+
+		typeCache, found = cache.entries[key]
+
+		if !found {
+			entry := make(map[string]*cacheEntry)
+			cache.entries[key] = entry
+			typeCache = entry
+		}
+
+		cache.mx.Unlock()
+	}
+
+	// Now we search for the named cache in the existing type cache
+	namedCache, found := typeCache[name]
 
 	if !found {
 		cache.mx.Lock()
 
-		value, found = cache.entries[key]
+		namedCache, found = typeCache[name]
 
 		if !found {
 			entry := cacheEntry{}
-			cache.entries[key] = &entry
-			value = &entry
+			typeCache[name] = &entry
+			namedCache = &entry
 		}
 
 		cache.mx.Unlock()
-
-		if !value.initialized {
-			value.mx.Lock()
-
-			if !value.initialized {
-				value.initialized = true
-				value.instance = buildItem[T](c, d)
-			}
-
-			value.mx.Unlock()
-		}
 	}
 
-	return value.instance.(T), nil
+	if !namedCache.initialized {
+		namedCache.mx.Lock()
+
+		if !namedCache.initialized {
+			namedCache.initialized = true
+			namedCache.instance = buildItem[T](c, d)
+		}
+
+		namedCache.mx.Unlock()
+	}
+
+	val, ok := namedCache.instance.(T)
+	if !ok {
+		panic("Couldn't cast the type")
+	}
+
+	return val, nil
 }
 
 func buildItem[T any](c *Container, d *definition) T {
-	var factory = d.f[0].(func(c *Container) T)
+	factory, ok := d.f[0].(func(c *Container) T)
+	if !ok {
+		panic("factory doesn't match the expected format")
+	}
+
 	value := factory(c)
 
 	for i := 1; i <= len(d.f)-1; i++ {
-		decoratorF := d.f[i].(func(decorated T, c *Container) T)
+		decoratorF, ok := d.f[i].(func(decorated T, c *Container) T)
+		if !ok {
+			panic("Couldn't cast the decorator factory")
+		}
+
 		value = decoratorF(value, c)
 	}
 
