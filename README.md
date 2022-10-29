@@ -49,10 +49,15 @@ godi.Scoped(cont, func(c *godi.Container) SomeInterface {
 
 newScopedContainer := cont.NewScope()
 
-// Registered scoped definitions are only available for the scoped container, so that other scoped container can register the same definition like context.Context for each request
-ctx := context.WithValue(r.Context(), "Some", "OnRootPath")
+// Registered scoped definitions are only available for the scoped container
+// and could be injected on any object of the stack
+
+// Like passing the context only where needed for cancellations 
+// without having to pass it across the whole stack, 
+// or inject distributed tracing information where needed
+
 godi.Scoped(newScopedContainer, func(c *godi.Container) context.Context {
-    return ctx
+    return r.Context()
 })
 
 ```
