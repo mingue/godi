@@ -288,3 +288,36 @@ func TestGetScopedReturnDifferentInstanceOnDifferentScopeForNamedDefinitions(t *
 		}
 	}
 }
+
+func TestSameDefinitionReturnErrorIfRegisteredInGlobalAndScopedContainer(t *testing.T) {
+	var cont = godi.New()
+	godi.Scoped(cont, func(c *godi.Container) *SomeStruct {
+		return &SomeStruct{}
+	})
+
+	var secondScope = cont.NewScope()
+	err := godi.Scoped(secondScope, func(c *godi.Container) *SomeStruct {
+		return &SomeStruct{}
+	})
+
+	if err == nil {
+		t.Fatal("If definition already registered in global container it should not allow to register in scoped container")
+	}
+}
+
+func TestSameDefinitionCanBeRegisteredOncePerScopedContainer(t *testing.T) {
+	var cont = godi.New()
+	firstScope := cont.NewScope()
+	godi.Scoped(firstScope, func(c *godi.Container) *SomeStruct {
+		return &SomeStruct{}
+	})
+
+	var secondScope = cont.NewScope()
+	err := godi.Scoped(secondScope, func(c *godi.Container) *SomeStruct {
+		return &SomeStruct{}
+	})
+
+	if err != nil {
+		t.Fatal("It should allow to register instance on new scope")
+	}
+}
