@@ -1,16 +1,17 @@
+// GODI a idiomatic DI container for go
 package godi
 
 import (
-	"fmt"
+	"errors"	
 	"reflect"
 	"sync"
 )
 
-const (
-	ErrDecoratedMustBeInterface = "item to decorate must be an interface"
-	ErrFactoryAlreadyRegistered = "factory already registered"
-	ErrFactoryNotRegistered     = "factory not registered"
-	ErrDecoratorBeforeFactory   = "a factory needs to be registered before a decorator"
+var (
+	ErrDecoratedMustBeInterface = errors.New("item to decorate must be an interface")
+	ErrFactoryAlreadyRegistered = errors.New("factory already registered")
+	ErrFactoryNotRegistered     = errors.New("factory not registered")
+	ErrDecoratorBeforeFactory   = errors.New("a factory needs to be registered before a decorator")
 )
 
 type Container struct {
@@ -92,7 +93,7 @@ func add[T any](c *Container, name string, lifetime lifetime, f func(c *Containe
 		_, foundNamedDef := typeDef[name]
 
 		if foundNamedDef {
-			return fmt.Errorf(ErrFactoryAlreadyRegistered)
+			return ErrFactoryAlreadyRegistered
 		}
 	}
 
@@ -130,11 +131,11 @@ func Decorate[T any](c *Container, f func(decorated T, c *Container) T) error {
 	}
 
 	if !foundTypeDef {
-		return fmt.Errorf(ErrDecoratorBeforeFactory)
+		return ErrDecoratorBeforeFactory
 	}
 
 	if target.Elem().Kind() != reflect.Interface {
-		return fmt.Errorf(ErrDecoratedMustBeInterface)
+		return ErrDecoratedMustBeInterface
 	}
 
 	// For each registration for the type we add the decorated as we can have named definitions
@@ -166,13 +167,13 @@ func GetNamed[T any](c *Container, name string) (T, error) {
 	if !foundTypeDef {
 		var result T
 
-		return result, fmt.Errorf(ErrFactoryNotRegistered)
+		return result, ErrFactoryNotRegistered
 	}
 
 	if len(typeDef) == 0 {
 		var result T
 
-		return result, fmt.Errorf(ErrFactoryNotRegistered)
+		return result, ErrFactoryNotRegistered
 	}
 
 	namedDef, foundNamedDef := typeDef[name]
@@ -180,7 +181,7 @@ func GetNamed[T any](c *Container, name string) (T, error) {
 	if !foundNamedDef {
 		var result T
 
-		return result, fmt.Errorf(ErrFactoryNotRegistered)
+		return result, ErrFactoryNotRegistered
 	}
 
 	if namedDef.lifetime == LifetimeSingleton {
@@ -196,6 +197,55 @@ func GetNamed[T any](c *Container, name string) (T, error) {
 	}
 
 	return buildItem[T](c, namedDef), nil
+}
+
+func GetNoAlloc[T any](c *Container, x *T) error {
+	return GetNamedNoAlloc(c, x, "")
+}
+
+func GetNamedNoAlloc[T any](c *Container, x *T, name string) error {
+	key := getKeyFromT[T]()
+
+	var typeDef map[string]*definition
+	foundTypeDef := false
+
+	if c.scopedDef != nil {
+		typeDef, foundTypeDef = c.scopedDef[key]
+	}
+
+	if !foundTypeDef {
+		typeDef, foundTypeDef = c.globalDef[key]
+	}
+
+	if !foundTypeDef {
+		return ErrFactoryNotRegistered
+	}
+
+	if len(typeDef) == 0 {
+		return ErrFactoryNotRegistered
+	}
+
+	namedDef, foundNamedDef := typeDef[name]
+
+	if !foundNamedDef {
+		return ErrFactoryNotRegistered
+	}
+
+	if namedDef.lifetime == LifetimeSingleton {
+		found := getFromCacheOrBuildNoAlloc(c, c.singletonCache, key, name, namedDef, x)
+
+		return found
+	}
+
+	if namedDef.lifetime == LifetimeScoped {
+		found := getFromCacheOrBuildNoAlloc(c, c.scopedCache, key, name, namedDef, x)
+
+		return found
+	}
+
+	buildItemNoAlloc(c, x, namedDef)
+
+	return nil
 }
 
 func (c *Container) NewScope() *Container {
@@ -275,6 +325,72 @@ func getFromCacheOrBuild[T any](
 	return val, nil
 }
 
+// We use a thread safe from getting items from the cache or build new ones
+// There are 2 level caches one to lock the creation of containers for the type
+// and the second one for the instance itself
+// as it might need to resolved other dependencies and types.
+func getFromCacheOrBuildNoAlloc[T any](
+	c *Container,
+	cache *lifetimeCache,
+	key reflect.Type,
+	name string,
+	d *definition,
+	x *T) error {
+	typeCache, found := cache.entries[key]
+
+	// If cache not found for the type create one
+	if !found {
+		cache.mx.Lock()
+
+		typeCache, found = cache.entries[key]
+
+		if !found {
+			entry := make(map[string]*cacheEntry)
+			cache.entries[key] = entry
+			typeCache = entry
+		}
+
+		cache.mx.Unlock()
+	}
+
+	// Now we search for the named cache in the existing type cache
+	namedCache, found := typeCache[name]
+
+	if !found {
+		cache.mx.Lock()
+
+		namedCache, found = typeCache[name]
+
+		if !found {
+			entry := cacheEntry{}
+			typeCache[name] = &entry
+			namedCache = &entry
+		}
+
+		cache.mx.Unlock()
+	}
+
+	if !namedCache.initialized {
+		namedCache.mx.Lock()
+
+		if !namedCache.initialized {
+			namedCache.initialized = true
+			buildItemNoAlloc(c, x, d)
+			namedCache.instance = *x
+		}
+
+		namedCache.mx.Unlock()
+	}
+
+	val, ok := namedCache.instance.(T)
+	*x = val
+	if !ok {
+		panic("Couldn't cast the type")
+	}
+
+	return nil
+}
+
 func buildItem[T any](c *Container, d *definition) T {
 	factory, ok := d.f[0].(func(c *Container) T)
 	if !ok {
@@ -293,6 +409,25 @@ func buildItem[T any](c *Container, d *definition) T {
 	}
 
 	return value
+}
+
+func buildItemNoAlloc[T any](c *Container, x *T, d *definition) {
+	factory, ok := d.f[0].(func(c *Container) T)
+	if !ok {
+		panic("factory doesn't match the expected format")
+	}
+
+	val := factory(c)
+
+	for i := 1; i <= len(d.f)-1; i++ {
+		decoratorF, ok := d.f[i].(func(decorated T, c *Container) T)
+		if !ok {
+			panic("Couldn't cast the decorator factory")
+		}
+
+		val = decoratorF(val, c)
+	}
+	*x = val
 }
 
 func getKeyFromT[T any]() reflect.Type {

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,7 +10,11 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting execution")
+	initServer()
+}
+
+func initServer() {
+	log.Printf("Starting execution...")
 
 	// Create Container
 	cont := godi.New()
@@ -27,13 +29,13 @@ func main() {
 	})
 
 	godi.ScopedNamed(cont, readyPath, func(c *godi.Container) http.Handler {
-		ctx, _ := godi.Get[context.Context](c)
-		return &invoice.ReadyHandler{Ctx: ctx}
+		requestContext, _ := godi.Get[invoice.RequestContext](c)
+		return invoice.NewReadyHandler(requestContext)
 	})
 
 	godi.Scoped(cont, func(c *godi.Container) invoice.InvoiceRepository {
-		ctx, _ := godi.Get[context.Context](c)
-		return invoice.NewInvoiceRepositoryImpl(ctx)
+		requestContext, _ := godi.Get[invoice.RequestContext](c)
+		return invoice.NewInvoiceRepositoryImpl(requestContext)
 	})
 
 	godi.Scoped(cont, func(c *godi.Container) invoice.InvoiceService {
@@ -50,46 +52,43 @@ func main() {
 		return NewRequestLoggingDecorator(d, logger)
 	})
 
-	// Start the http server
+	// Register http handlers
+	rootCounter := 0
 	http.HandleFunc(rootPath, func(w http.ResponseWriter, r *http.Request) {
+		// Create a new container with scope for the http request
 		requestCont := cont.NewScope()
 
-		// Only as example, you can now register a struct to be injected anywhere on the stack
-		ctx := context.WithValue(r.Context(), "Some", "OnRootPath")
-		godi.Scoped(requestCont, func(c *godi.Container) context.Context {
-			return ctx
-		})
-		// if err != nil {
-		// 	fmt.Printf("Error registering the context: %v \n", err)
-		// 	r.Response.StatusCode = 500
-		// 	fmt.Fprint(w, fmt.Sprintf("Error registering the context: %v \n", err))
-		// 	return
-		// }
+		rootCounter++
 
+		// Register any http request scoped object, which can be enriched with anything from the http.Request
+		godi.Scoped(requestCont, func(c *godi.Container) invoice.RequestContext {
+			userAgent := r.Header["User-Agent"][0]
+			return invoice.RequestContext{SomeValue: "On root path", UserAgent: userAgent, Counter: rootCounter}
+		})
+
+		// When you get an object from the container, it can have dependencies on the http request scoped dependencies registered above
+		// There is no need to pass the objects across the stack, can be injected to any object
 		h, _ := godi.GetNamed[http.Handler](requestCont, rootPath)
 		h.ServeHTTP(w, r)
 	})
 
+	readyCounter := 0
+
 	http.HandleFunc(readyPath, func(w http.ResponseWriter, r *http.Request) {
 		requestCont := cont.NewScope()
 
-		// Only as example, you can now register a struct to be injected anywhere on the stack
-		ctx := context.WithValue(r.Context(), "Some", "OnReadyPath")
-		err := godi.Scoped(requestCont, func(c *godi.Container) context.Context {
-			return ctx
+		readyCounter++
+
+		godi.Scoped(requestCont, func(c *godi.Container) invoice.RequestContext {
+			userAgent := r.Header["User-Agent"][0]
+			return invoice.RequestContext{SomeValue: "On ready path", UserAgent: userAgent, Counter: readyCounter}
 		})
-		if err != nil {
-			r.Response.StatusCode = 500
-			fmt.Fprint(w, fmt.Sprintf("Error registering the context: %v \n", err))
-			return
-		}
 
 		h, _ := godi.GetNamed[http.Handler](requestCont, readyPath)
 		h.ServeHTTP(w, r)
 	})
 
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		panic("Couldn't start the server")
-	}
+	// Start the http server
+	log.Printf("Listening on port :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

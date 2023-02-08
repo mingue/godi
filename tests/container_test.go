@@ -11,7 +11,7 @@ func TestGetErrorIfNotRegistered(t *testing.T) {
 	var cont = godi.New()
 	_, err := godi.Get[SomeInterface](cont)
 
-	if err == nil || err.Error() != godi.ErrFactoryNotRegistered {
+	if err == nil || err != godi.ErrFactoryNotRegistered {
 		log.Fatal("Expecting factory not registered")
 	}
 }
@@ -26,7 +26,7 @@ func TestGetErrorIfAlreadyRegistered(t *testing.T) {
 		return &SomeStruct{}
 	})
 
-	if err == nil || err.Error() != godi.ErrFactoryAlreadyRegistered {
+	if err == nil || err != godi.ErrFactoryAlreadyRegistered {
 		log.Fatal("Expecting factory not registered")
 	}
 }

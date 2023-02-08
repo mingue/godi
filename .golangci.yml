@@ -1,7 +1,8 @@
-# v1.50.1
+# v1.51.1
 # Please don't remove the first line. It uses in CI to determine the golangci version
 run:
   deadline: 5m
+  tests: true
 
 issues:
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
@@ -21,8 +22,6 @@ linters-settings:
     check-shadowing: true
   cyclop:
     max-complexity: 25
-  maligned:
-    suggest-new: true
   dupl:
     threshold: 150
   goconst:
@@ -31,25 +30,26 @@ linters-settings:
   funlen:
     lines: 80
     statements: 60
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    disable-default-exclusions: true
 
 linters:
-  enable-all: true
-  disable:
-    - godot
-    #- godox
-    #- gomodguard
-    - wsl
-    - gomnd
-    - goheader
-    - exhaustivestruct
-    - thelper
-    - gocyclo # replaced by cyclop since it also calculates the package complexity
-    - maligned # replaced by govet 'fieldalignment'
-    - interfacer # deprecated
-    - scopelint # deprecated, replaced by exportloopref
-    - golint # this linter is deprecated
-    - ireturn
-    - tagliatelle
-    - exhaustruct
-    - gofumpt
+  enable-all: false
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - cyclop
+    - nolintlint
+    - exhaustive
+    - govet
+    - dupl
+    - goconst
+    - funlen
   fast: false

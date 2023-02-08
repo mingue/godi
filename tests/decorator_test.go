@@ -42,7 +42,7 @@ func TestDecorateErrorsIfFactoryNotRegisteredPreviously(t *testing.T) {
 		}
 	})
 
-	if err == nil || err.Error() != godi.ErrDecoratorBeforeFactory {
+	if err == nil || err != godi.ErrDecoratorBeforeFactory {
 		log.Fatal("Expecting factory first error")
 	}
 }
@@ -58,7 +58,7 @@ func TestDecorateOnlyAcceptsInterfaces(t *testing.T) {
 		return &SimpleDoer{}
 	})
 
-	if err == nil || err.Error() != godi.ErrDecoratedMustBeInterface {
+	if err == nil || err != godi.ErrDecoratedMustBeInterface {
 		log.Fatal("Validation failed")
 	}
 }

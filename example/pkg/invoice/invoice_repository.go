@@ -1,9 +1,6 @@
 package invoice
 
-import (
-	"context"
-	"fmt"
-)
+import "log"
 
 type InvoiceRepository interface {
 	GetAll() []Invoice
@@ -12,21 +9,17 @@ type InvoiceRepository interface {
 var _ InvoiceRepository = &InvoiceRepositoryImpl{}
 
 type InvoiceRepositoryImpl struct {
-	ctx context.Context
+	requestContext RequestContext
 }
 
-func NewInvoiceRepositoryImpl(ctx context.Context) *InvoiceRepositoryImpl {
+func NewInvoiceRepositoryImpl(requestContext RequestContext) *InvoiceRepositoryImpl {
 	return &InvoiceRepositoryImpl{
-		ctx: ctx,
+		requestContext: requestContext,
 	}
 }
 
 func (r *InvoiceRepositoryImpl) GetAll() []Invoice {
-	// There is no need to use this API, you can register a struct for the request scope
-	// leaving the use of context only for cancellations
-	val := r.ctx.Value("Some")
-	
-	fmt.Printf("Printing value from repo: %v\n", val)
+	log.Printf("Printing value: %v, User Agent: %v, Request count: %v", r.requestContext.SomeValue, r.requestContext.UserAgent, r.requestContext.Counter)
 	return []Invoice{
 		{},
 		{},
